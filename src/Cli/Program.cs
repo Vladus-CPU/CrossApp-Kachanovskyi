@@ -1,72 +1,123 @@
-﻿using System.Text.Json;
-using System.Text.Encodings.Web;
-using System.Text.Unicode;
-using Core;
+﻿using System.Text;
+using Core.Dto;
+using Core.Import;
 
-Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.OutputEncoding = Encoding.UTF8;
 
-bool jsonMode = false;
+bool mixedMode = args.Length > 0 && args[0].Equals("--mixed", StringComparison.OrdinalIgnoreCase);
 
-for (int i = 0; i < args.Length; i++)
+string path;
+
+if (mixedMode)
 {
-    if (args[i] == "--json")
+    path = args.Length > 1 ? args[1] : Path.Combine("data", "mixed.csv");
+}
+    else
+{
+    path = args.Length > 0 ? args[0] : Path.Combine("data", "sample.csv");
+}
+
+if (!File.Exists(path))
+{
+    Console.WriteLine(
+        $"Файл не знайдено: {Path.GetFullPath(path)}");
+
+    return 1;
+}
+
+if (mixedMode)
+{
+    ImportResult<ImportEntryDto> mixedResult =
+        MixedCsvImporter.Load(path);
+
+    Console.WriteLine(
+        $"Завантажено записів: {mixedResult.Items.Count}");
+
+    foreach (ImportEntryDto item in mixedResult.Items.Take(5))
     {
-        jsonMode = true;
-        break;
+        switch (item)
+        {
+            case ProductDto product:
+                Console.WriteLine(
+                    $"Товар: {product.Id} {product.Name} {product.Price:F2}");
+                break;
+
+            case CustomerDto customer:
+                Console.WriteLine(
+                    $"Клієнт: {customer.Id} {customer.Name} {customer.Email}");
+                break;
+        }
+    }
+
+    if (mixedResult.Errors.Count > 0)
+    {
+        Console.WriteLine(
+            $"Пропущено рядків: {mixedResult.Errors.Count}");
+
+        foreach (string error in mixedResult.Errors)
+        {
+            Console.WriteLine($"! {error}");
+        }
+    }
+
+    int total = mixedResult.Items.Count + mixedResult.Errors.Count;
+
+    double errorPercent = total == 0 ? 0 : mixedResult.Errors.Count * 100.0 / total;
+
+    Console.WriteLine(
+        $"Статистика: усього {total} / " +
+        $"прийнято {mixedResult.Items.Count} / " +
+        $"пропущено {mixedResult.Errors.Count} / " +
+        $"помилок {errorPercent:F1}%");
+
+    return 0;
+}
+
+string extension = Path.GetExtension(path).ToLowerInvariant();
+
+ImportResult<ProductDto>? result = extension switch
+{
+    ".csv" => ProductCsvImporter.Load(path),
+    ".json" => ProductJsonImporter.Load(path),
+    _ => null
+};
+
+if (result is null)
+{
+    Console.WriteLine(
+        $"Непідтримуваний формат файлу: {extension}");
+
+    return 1;
+}
+
+Console.WriteLine(
+    $"Завантажено записів: {result.Items.Count}");
+
+foreach (ProductDto product in result.Items.Take(5))
+{
+    Console.WriteLine(
+        $"{product.Id,-6} {product.Name,-24} {product.Price:F2}");
+}
+
+if (result.Errors.Count > 0)
+{
+    Console.WriteLine(
+        $"Пропущено рядків: {result.Errors.Count}");
+
+    foreach (string error in result.Errors)
+    {
+        Console.WriteLine($"! {error}");
     }
 }
 
-EnvironmentReport report = EnvironmentInfo.Collect();
+int allRecords = result.Items.Count + result.Errors.Count;
 
-var info = new
-{
-    Student = "Качановський Владислав",
-    Group = "ФЕІ-36",
-    OSDescription = report.OsDescription,
-    OSVersion = report.OsVersion,
-    Architecture = report.ProcessArchitecture,
-    DotNetVersion = report.DotNetVersion,
-    Runtime = report.FrameworkDescription,
-    ApplicationDirectory = report.BaseDirectory,
-    CurrentDirectory = report.CurrentDirectory,
-    DetectedRid = report.DetectedRid,
-    ReportedRid = report.ReportedRid,
-    BuildNote = report.BuildNote,
-    Domain = "Предметна область: Замовлення (клієнти, товари, замовлення, рядки замовлень)"
-};
+double errorsPercent = allRecords == 0 ? 0 : result.Errors.Count * 100.0 / allRecords;
 
-var JsonOption = new JsonSerializerOptions
-{
-    Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
-};
+Console.WriteLine(
+    $"Статистика: усього {allRecords} / " +
+    $"прийнято {result.Items.Count} / " +
+    $"пропущено {result.Errors.Count} / " +
+    $"помилок {errorsPercent:F1}%");
 
-if (jsonMode == true)
-{
-    string json = JsonSerializer.Serialize(info, JsonOption);
-    Console.WriteLine(json);
-    Console.WriteLine($"Натисніть будь-яку клавішу для завершення");
-    Console.ReadKey();
-    return;
-}
-
-Console.WriteLine("CrossApp - практикум з крос-платформного програмування");
-Console.WriteLine("Студент: Качановський Владислав, група ФЕІ-36");
-Console.WriteLine(new string('-', 67));
-
-Console.WriteLine($"ОС (OSDescription) : {report.OsDescription}");
-Console.WriteLine($"ОС (Environment) : {report.OsVersion}");
-Console.WriteLine($"Архітектура процесу : {report.ProcessArchitecture}");
-Console.WriteLine($"Версія .NET (CLR) : {report.DotNetVersion}");
-Console.WriteLine($"Runtime : {report.FrameworkDescription}");
-Console.WriteLine($"RID (визначено) : {report.DetectedRid}");
-Console.WriteLine($"RID (від .NET) : {report.ReportedRid}");
-Console.WriteLine($"Каталог застосунку : {report.BaseDirectory}");
-Console.WriteLine($"Поточний каталог : {report.CurrentDirectory}");
-Console.WriteLine($"Версія збірки : {report.BuildNote}");
-Console.WriteLine(new string('-', 67));
-Console.WriteLine("Предметна область: Замовлення (клієнти, товари, замовлення, рядки замовлень)");
-Console.WriteLine("Призначення: оформлення замовлень і підрахунок сум.");
-
-Console.WriteLine(new string('-', 67));
-Console.WriteLine($"Натисніть будь-яку клавішу для завершення");
-Console.ReadKey();
+return 0;

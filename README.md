@@ -19,13 +19,26 @@ CrossApp/
 ├── CrossApp.slnx
 ├── README.md
 ├── .gitignore
+├── data/
+│   ├── sample.csv
+│   ├── sample.json
+│   └── mixed.csv
 └── src/
     ├── Cli/
     │   ├── Cli.csproj
     │   └── Program.cs
     └── Core/
         ├── Core.csproj
-        └── EnvironmentInfo.cs
+        ├── EnvironmentInfo.cs
+        ├── Dto/
+        │   ├── ImportEntryDto.cs
+        │   ├── ProductDto.cs
+        │   ├── CustomerDto.cs
+        │   └── ImportResult.cs
+        └── Import/
+            ├── ProductCsvImporter.cs
+            ├── ProductJsonImporter.cs
+            └── MixedCsvImporter.cs
 ```
 
 ## Запуск 
@@ -36,7 +49,22 @@ dotnet run --project src/Cli
 
 ## Запуск у форматі JSON: 
 ```bash
-dotnet run --project src/Cli -- --json
+dotnet run --project src/Cli -- data/sample.json
+```
+## Запуск змішаного CSV:
+```bash
+dotnet run --project src/Cli -- --mixed data/mixed.csv
+```
+## Імпорт даних
+```text
+Основний формат CSV:
+id;name;price
+P-xxx;name;price
+Програма завантажує коректні записи, а пошкоджені рядки пропускає та виводить номер рядка і причину помилки.
+Підтримуються:
+- CSV
+- JSON
+- змішані записи Product і Customer.
 ```
 
 ## Публікація (Publish)
@@ -73,13 +101,15 @@ dotnet publish src/Cli -c Release -r linux-x64 --self-contained true
 Windows:
 ```bash
 .\src\Cli\bin\Release\net10.0\win-x64\publish\Cli.exe
-.\src\Cli\bin\Release\net10.0\win-x64\publish\Cli.exe --json
+.\src\Cli\bin\Release\net10.0\win-x64\publish\Cli.exe data\sample.json
+.\src\Cli\bin\Release\net10.0\win-x64\publish\Cli.exe --mixed data\mixed.csv
 ```
 
 Linux:
 ```bash
 ./src/Cli/bin/Release/net10.0/linux-x64/publish/Cli
-./src/Cli/bin/Release/net10.0/linux-x64/publish/Cli --json
+./src/Cli/bin/Release/net10.0/linux-x64/publish/Cli data/sample.json
+./src/Cli/bin/Release/net10.0/linux-x64/publish/Cli --mixed data/mixed.csv
 ```
 
 ## Self-contained vs Framework-dependent
