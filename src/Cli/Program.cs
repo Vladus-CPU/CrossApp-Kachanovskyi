@@ -5,16 +5,139 @@ using Core.Import;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-bool lab4Mode = args.Length == 0 ||
-    args[0].Equals("--lab4", StringComparison.OrdinalIgnoreCase);
-
-if (lab4Mode)
+if (args.Length > 0 && args[0].Equals("--order", StringComparison.OrdinalIgnoreCase))
 {
-    RunLab4();
+    Console.WriteLine("=== Успішний сценарій ===");
+
+    Order order = Order.Create("C-001");
+    order.AddLine("P-001", "Ноутбук", 28999.90m, 1);
+    order.AddLine("P-002", "Миша", 649.50m, 2);
+
+    Console.WriteLine(order);
+
+    order.Confirm();
+    Console.WriteLine(order);
+
+    OrderDto dto = order.ToDto();
+    Order restoredOrder = Order.FromDto(dto);
+
+    Console.WriteLine($"Відновлено з DTO: {restoredOrder}");
+    Console.WriteLine();
+
+    Console.WriteLine("=== Порушення інваріантів ===");
+
+    try
+    {
+        Order.Create("");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Порожній ID клієнта: {ex.Message}");
+    }
+
+    try
+    {
+        Order testOrder = Order.Create("C-002");
+        testOrder.AddLine("P-003", "Клавіатура", 1299.00m, 0);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Неправильна кількість: {ex.Message}");
+    }
+
+    try
+    {
+        Order testOrder = Order.Create("C-003");
+        testOrder.AddLine("P-004", "Монітор", -100m, 1);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Неправильна ціна: {ex.Message}");
+    }
+
+    try
+    {
+        Order emptyOrder = Order.Create("C-004");
+        emptyOrder.Confirm();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Порожнє замовлення: {ex.Message}");
+    }
+
+    try
+    {
+        order.AddLine("P-005", "Навушники", 2199.50m, 1);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Зміна підтвердженого замовлення: {ex.Message}");
+    }
+
+    try
+    {
+        order.Confirm();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Повторне підтвердження: {ex.Message}");
+    }
+
+    Order cancelledOrder = Order.Create("C-005");
+    cancelledOrder.AddLine("P-006", "SSD", 2999.99m, 1);
+    cancelledOrder.Cancel();
+
+    try
+    {
+        cancelledOrder.Confirm();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Підтвердження скасованого: {ex.Message}");
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("=== ImportResult ===");
+
+    var orderDtos = new List<OrderDto>
+    {
+        order.ToDto(),
+        new OrderDto("O-002", "", [], OrderStatus.Draft),
+        new OrderDto("O-003", "C-003", [], OrderStatus.Confirmed)
+    };
+
+    var importResult = new ImportResult<OrderDto>(orderDtos, []);
+    ImportResult<Order> importedOrders = OrderMapper.FromImportResult(importResult);
+
+    Console.WriteLine($"Прийнято замовлень: {importedOrders.Items.Count}");
+    Console.WriteLine($"Помилок: {importedOrders.Errors.Count}");
+
+    foreach (string error in importedOrders.Errors)
+        Console.WriteLine($"! {error}");
+
+    Console.WriteLine();
+    Console.WriteLine("=== Правило між сутностями ===");
+
+    Customer customer = Customer.Create("C-100", "Іван Петренко", "ivan@example.com");
+    var customerOrders = new List<Order>();
+
+    for (int i = 0; i < 5; i++)
+        customerOrders.Add(Order.Create(customer.Id));
+
+    try
+    {
+        OrderRules.CheckOrderLimit(customer, customerOrders);
+        customerOrders.Add(Order.Create(customer.Id));
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine(ex.Message);
+    }
+
     return 0;
 }
 
-bool mixedMode = args[0].Equals("--mixed", StringComparison.OrdinalIgnoreCase);
+bool mixedMode = args.Length > 0 && args[0].Equals("--mixed", StringComparison.OrdinalIgnoreCase);
 
 string path;
 
@@ -24,7 +147,7 @@ if (mixedMode)
 }
 else
 {
-    path = args[0];
+    path = args.Length > 0 ? args[0] : Path.Combine("data", "sample.csv");
 }
 
 if (!File.Exists(path))
@@ -64,11 +187,7 @@ if (mixedMode)
     int total = mixedResult.Items.Count + mixedResult.Errors.Count;
     double errorPercent = total == 0 ? 0 : mixedResult.Errors.Count * 100.0 / total;
 
-    Console.WriteLine(
-        $"Статистика: усього {total} / " +
-        $"прийнято {mixedResult.Items.Count} / " +
-        $"пропущено {mixedResult.Errors.Count} / " +
-        $"помилок {errorPercent:F1}%");
+    Console.WriteLine($"Статистика: усього {total} / прийнято {mixedResult.Items.Count} / пропущено {mixedResult.Errors.Count} / помилок {errorPercent:F1}%");
 
     return 0;
 }
@@ -104,60 +223,6 @@ if (result.Errors.Count > 0)
 int allRecords = result.Items.Count + result.Errors.Count;
 double errorsPercent = allRecords == 0 ? 0 : result.Errors.Count * 100.0 / allRecords;
 
-Console.WriteLine(
-    $"Статистика: усього {allRecords} / " +
-    $"прийнято {result.Items.Count} / " +
-    $"пропущено {result.Errors.Count} / " +
-    $"помилок {errorsPercent:F1}%");
+Console.WriteLine($"Статистика: усього {allRecords} / прийнято {result.Items.Count} / пропущено {result.Errors.Count} / помилок {errorsPercent:F1}%");
 
 return 0;
-
-static void RunLab4()
-{
-    Console.WriteLine("=== Сценарій 1: успіх ===");
-
-    Order order = Order.Create("C-001");
-    order.AddLine("P-001", "Ноутбук", 28999.90m, 1);
-    order.AddLine("P-002", "Миша", 649.50m, 2);
-
-    Console.WriteLine(order);
-
-    order.Confirm();
-    Console.WriteLine(order);
-
-    OrderDto dto = order.ToDto();
-    Order restored = Order.FromDto(dto);
-
-    Console.WriteLine($"Відновлено з DTO: {restored}");
-    Console.WriteLine();
-
-    Console.WriteLine("=== Сценарій 2: порушення інваріантів ===");
-
-    TryDo("додавання рядка після підтвердження",
-        () => order.AddLine("P-003", "Клавіатура", 1299.00m, 1));
-
-    TryDo("нульова кількість",
-        () => Order.Create("C-002").AddLine("P-004", "Монітор", 7499.99m, 0));
-
-    TryDo("від'ємна ціна",
-        () => Order.Create("C-003").AddLine("P-005", "Навушники", -1m, 1));
-
-    TryDo("підтвердження порожнього замовлення",
-        () => Order.Create("C-004").Confirm());
-
-    Console.WriteLine();
-    Console.WriteLine($"Після відмов підтверджене замовлення не змінилось: {order}");
-}
-
-static void TryDo(string title, Action action)
-{
-    try
-    {
-        action();
-        Console.WriteLine($"{title}: виняток НЕ спрацював");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"{title}: {ex.GetType().Name} - {ex.Message}");
-    }
-}
