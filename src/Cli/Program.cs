@@ -1,7 +1,11 @@
 ﻿using System.Text;
+using Core;
+using Core.Abstractions;
 using Core.Domain;
 using Core.Dto;
 using Core.Import;
+using Core.Services;
+using Core.Storage;
 
 Console.OutputEncoding = Encoding.UTF8;
 
@@ -137,6 +141,17 @@ if (args.Length > 0 && args[0].Equals("--order", StringComparison.OrdinalIgnoreC
     return 0;
 }
 
+bool storeMode = args.Length == 0 ||
+    args.Contains("--store") ||
+    args.Contains("--file") ||
+    args.Contains("--cache");
+
+if (storeMode)
+{
+    RunOrderStorage(args);
+    return 0;
+}
+
 bool mixedMode = args.Length > 0 && args[0].Equals("--mixed", StringComparison.OrdinalIgnoreCase);
 
 string path;
@@ -226,3 +241,75 @@ double errorsPercent = allRecords == 0 ? 0 : result.Errors.Count * 100.0 / allRe
 Console.WriteLine($"Статистика: усього {allRecords} / прийнято {result.Items.Count} / пропущено {result.Errors.Count} / помилок {errorsPercent:F1}%");
 
 return 0;
+
+static void RunOrderStorage(string[] args)
+{
+    IOrderStore store = StoreFactory.Create(args);
+    var service = new OrderService(store);
+
+    Console.WriteLine($"Сховище: {store.GetType().Name}");
+    Console.WriteLine();
+
+    try
+    {
+        Customer customer = Customer.Create("C-100", "Іван Петренко", "ivan@example.com");
+
+        Order created = service.CreateOrder(customer);
+        service.AddLine(created.Id, "P-101", "Клавіатура", 1299.00m, 1);
+        service.AddLine(created.Id, "P-102", "Миша", 649.50m, 2);
+        service.Confirm(created.Id);
+
+        Console.WriteLine($"Створено замовлення: {created.Id}");
+
+        Console.WriteLine();
+        Console.WriteLine("=== Список замовлень ===");
+
+        foreach (Order order in service.All())
+            Console.WriteLine(order);
+
+        Console.WriteLine();
+        Console.WriteLine("=== Пошук за id ===");
+
+        Order? found = service.Find(created.Id);
+
+        if (found is not null)
+            Console.WriteLine($"Знайдено: {found}");
+
+        Console.WriteLine();
+        Console.WriteLine("=== Підтверджені замовлення ===");
+
+        IReadOnlyList<Order> confirmedOrders = service.Search(order => order.Status == OrderStatus.Confirmed);
+
+        foreach (Order order in confirmedOrders)
+            Console.WriteLine(order);
+
+        Console.WriteLine();
+        Console.WriteLine("=== Перевірка помилки ===");
+
+        service.Confirm("ORDER-NOT-FOUND");
+    }
+    catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+    {
+        Console.WriteLine($"Помилка: {ex.Message}");
+    }
+}
+
+public static class StoreFactory
+{
+    public static IOrderStore Create(string[] args)
+    {
+        bool useFile = args.Any(arg => arg.Equals("--file", StringComparison.OrdinalIgnoreCase));
+        bool useCache = args.Any(arg => arg.Equals("--cache", StringComparison.OrdinalIgnoreCase));
+
+        string dataPath = Path.Combine("data", "orders.json");
+
+        IOrderStore store = useFile
+            ? new FileOrderStore(dataPath)
+            : new InMemoryOrderStore(SampleData.Orders());
+
+        if (useCache)
+            store = new CachingOrderStore(store);
+
+        return store;
+    }
+}
