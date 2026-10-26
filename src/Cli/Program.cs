@@ -1,11 +1,9 @@
 ﻿using System.Text;
-using Core;
-using Core.Abstractions;
+using Cli;
 using Core.Domain;
 using Core.Dto;
+using Core.Events;
 using Core.Import;
-using Core.Services;
-using Core.Storage;
 
 Console.OutputEncoding = Encoding.UTF8;
 
@@ -173,7 +171,8 @@ if (!File.Exists(path))
 
 if (mixedMode)
 {
-    ImportResult<ImportEntryDto> mixedResult = MixedCsvImporter.Load(path);
+    var skippedLines = new List<string>();
+    ImportResult<ImportEntryDto> mixedResult = MixedCsvImporter.Load(path, skippedLines.Add);
 
     Console.WriteLine($"Завантажено записів: {mixedResult.Items.Count}");
 
@@ -195,7 +194,7 @@ if (mixedMode)
     {
         Console.WriteLine($"Пропущено рядків: {mixedResult.Errors.Count}");
 
-        foreach (string error in mixedResult.Errors)
+        foreach (string error in skippedLines)
             Console.WriteLine($"! {error}");
     }
 
@@ -244,8 +243,28 @@ return 0;
 
 static void RunOrderStorage(string[] args)
 {
-    IOrderStore store = StoreFactory.Create(args);
-    var service = new OrderService(store);
+    var (service, store) = CompositionRoot.Create(args);
+
+    string logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
+    Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
+    int changes = 0;
+
+    void OnOrderChanged(object? sender, OrderChangedEventArgs e)
+    {
+        string line = e.ToString();
+        Console.WriteLine($"[1-й підписник] {line} (лічильник: {changes})");
+        File.AppendAllText(logPath, line + Environment.NewLine);
+    }
+
+    EventHandler<OrderChangedEventArgs> countHandler = (_, _) =>
+    {
+        changes++;
+        Console.WriteLine($"[2-й підписник] Подій отримано: {changes}");
+    };
+
+    service.Changed += OnOrderChanged;
+    service.Changed += countHandler;
 
     Console.WriteLine($"Сховище: {store.GetType().Name}");
     Console.WriteLine();
@@ -254,11 +273,41 @@ static void RunOrderStorage(string[] args)
     {
         Customer customer = Customer.Create("C-100", "Іван Петренко", "ivan@example.com");
 
+        Console.WriteLine("=== Створення замовлення ===");
+
         Order created = service.CreateOrder(customer);
         service.AddLine(created.Id, "P-101", "Клавіатура", 1299.00m, 1);
+
+        Console.WriteLine($"Подій отримано: {changes}");
+
+        Console.WriteLine();
+        Console.WriteLine("=== Перевірка інваріанта ===");
+
+        int beforeError = changes;
+
+        try
+        {
+            service.AddLine(created.Id, "P-999", "Некоректний товар", 100m, -1);
+        }
+        catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+        {
+            Console.WriteLine($"Помилка: {ex.Message}");
+        }
+
+        Console.WriteLine($"Подій після помилки: {changes} (було: {beforeError})");
+
+        Console.WriteLine();
+        Console.WriteLine("=== Відписка від події ===");
+
+        service.Changed -= OnOrderChanged;
+
         service.AddLine(created.Id, "P-102", "Миша", 649.50m, 2);
+
+        Console.WriteLine($"Подій отримано: {changes}");
+
         service.Confirm(created.Id);
 
+        Console.WriteLine($"Подій після підтвердження: {changes}");
         Console.WriteLine($"Створено замовлення: {created.Id}");
 
         Console.WriteLine();
@@ -284,32 +333,50 @@ static void RunOrderStorage(string[] args)
             Console.WriteLine(order);
 
         Console.WriteLine();
+        Console.WriteLine("=== Пошук через Func ===");
+
+        IReadOnlyList<Order> inexpensiveOrders = service.Search(order => order.Total < 1000m);
+
+        foreach (Order order in inexpensiveOrders)
+            Console.WriteLine(order);
+
+        Console.WriteLine();
         Console.WriteLine("=== Перевірка помилки ===");
 
-        service.Confirm("ORDER-NOT-FOUND");
+        int beforeMissingId = changes;
+
+        try
+        {
+            service.Confirm("ORDER-NOT-FOUND");
+        }
+        catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+        {
+            Console.WriteLine($"Помилка: {ex.Message}");
+        }
+
+        Console.WriteLine($"Подій після відмови: {changes} (було: {beforeMissingId})");
     }
     catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
     {
         Console.WriteLine($"Помилка: {ex.Message}");
     }
-}
-
-public static class StoreFactory
-{
-    public static IOrderStore Create(string[] args)
+    finally
     {
-        bool useFile = args.Any(arg => arg.Equals("--file", StringComparison.OrdinalIgnoreCase));
-        bool useCache = args.Any(arg => arg.Equals("--cache", StringComparison.OrdinalIgnoreCase));
-
-        string dataPath = Path.Combine("data", "orders.json");
-
-        IOrderStore store = useFile
-            ? new FileOrderStore(dataPath)
-            : new InMemoryOrderStore(SampleData.Orders());
-
-        if (useCache)
-            store = new CachingOrderStore(store);
-
-        return store;
+        service.Changed -= OnOrderChanged;
+        service.Changed -= countHandler;
     }
+
+    Console.WriteLine();
+    Console.WriteLine("=== Додатково: NotificationSink через DI ===");
+
+    Customer demoCustomer = Customer.Create("C-DI", "Демо", "demo@example.com");
+
+    var consoleService = CompositionRoot.CreateConsoleDemoService();
+    consoleService.CreateOrder(demoCustomer);
+
+    string diLogPath = Path.Combine(AppContext.BaseDirectory, "logs", "di.log");
+    var fileService = CompositionRoot.CreateFileDemoService(diLogPath);
+    fileService.CreateOrder(demoCustomer);
+
+    Console.WriteLine("DI-повідомлення записано у logs/di.log");
 }

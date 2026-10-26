@@ -8,7 +8,7 @@ public static class MixedCsvImporter
 {
     private const char Separator = ';';
 
-    public static ImportResult<ImportEntryDto> Load(string path)
+    public static ImportResult<ImportEntryDto> Load(string path, Action<string>? onSkipped = null)
     {
         var items = new List<ImportEntryDto>();
         var errors = new List<string>();
@@ -37,7 +37,9 @@ public static class MixedCsvImporter
                     break;
 
                 case ParseFailed failed:
-                    errors.Add($"рядок {number}: {failed.Reason}");
+                    string error = $"рядок {number}: {failed.Reason}";
+                    errors.Add(error);
+                    onSkipped?.Invoke(error);
                     break;
             }
         }
@@ -98,7 +100,9 @@ public static class MixedCsvImporter
 
     private abstract record ParseOutcome;
 
-    private sealed record ParseOk(ImportEntryDto Value) : ParseOutcome;
+    private sealed record ParseOk(ImportEntryDto Value)
+        : ParseOutcome;
 
-    private sealed record ParseFailed(string Reason) : ParseOutcome;
+    private sealed record ParseFailed(string Reason)
+        : ParseOutcome;
 }
