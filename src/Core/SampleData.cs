@@ -1,3 +1,4 @@
+
 using Core.Domain;
 using Core.Dto;
 
@@ -9,7 +10,7 @@ public static class SampleData
     {
         var orders = new List<Order>();
 
-        for (int i = 1; i <= 15; i++)
+        for (int i = 1; i <= 20; i++)
         {
             string orderId = $"ORD-{i:000}";
             string customerId = $"C-{((i - 1) % 5) + 1:000}";
@@ -31,5 +32,17 @@ public static class SampleData
         }
 
         return orders;
+    }
+
+    public static IReadOnlyList<Customer> Customers()
+    {
+        return
+        [
+            Customer.Create("C-001", "Клієнт 1", "customer1@example.com"),
+            Customer.Create("C-002", "Клієнт 2", "customer2@example.com"),
+            Customer.Create("C-003", "Клієнт 3", "customer3@example.com"),
+            Customer.Create("C-004", "Клієнт 4", "customer4@example.com"),
+            Customer.Create("C-005", "Клієнт 5", "customer5@example.com")
+        ];
     }
 }

@@ -1,11 +1,23 @@
-﻿using System.Text;
+﻿
+using System.Globalization;
+using System.Text;
 using Cli;
+using Core;
 using Core.Domain;
 using Core.Dto;
 using Core.Events;
 using Core.Import;
+using Core.Reports;
 
 Console.OutputEncoding = Encoding.UTF8;
+
+string? reportCommand = args.FirstOrDefault(a => a.StartsWith("report-", StringComparison.OrdinalIgnoreCase));
+
+if (reportCommand is not null)
+{
+    RunReports(reportCommand, args);
+    return 0;
+}
 
 if (args.Length > 0 && args[0].Equals("--order", StringComparison.OrdinalIgnoreCase))
 {
@@ -379,4 +391,108 @@ static void RunOrderStorage(string[] args)
     fileService.CreateOrder(demoCustomer);
 
     Console.WriteLine("DI-повідомлення записано у logs/di.log");
+}
+
+static void RunReports(string command, string[] args)
+{
+    var (service, _) = CompositionRoot.Create(args);
+    IReadOnlyList<Order> orders = service.All();
+
+    switch (command.ToLowerInvariant())
+    {
+        case "report-top":
+            Console.WriteLine("=== Топ-5 клієнтів за сумою замовлень ===");
+
+            foreach (var c in ReportService.TopCustomers(orders, 5))
+                Console.WriteLine($"{c.CustomerId,-10} замовлень: {c.Count,3} сума: {c.Total,10:F2}");
+            break;
+
+        case "report-high":
+        {
+            decimal threshold = 1000m;
+            int index = Array.FindIndex(args, a => a.Equals("--min", StringComparison.OrdinalIgnoreCase));
+
+            if (index >= 0 && (index + 1 >= args.Length || !decimal.TryParse(args[index + 1], NumberStyles.Number, CultureInfo.InvariantCulture, out threshold)))
+            {
+                Console.WriteLine("Неправильна сума. Приклад: report-high --min 1000");
+                break;
+            }
+
+            Console.WriteLine($"=== Замовлення дорожчі за {threshold:F2} ===");
+            PrintOrders(ReportService.ExpensiveOrders(orders, threshold));
+            break;
+        }
+
+        case "report-groups":
+            Console.WriteLine("=== Групування за статусом ===");
+            PrintGroups(ReportService.ByStatus(orders));
+            break;
+
+        case "report-sum":
+        {
+            var t = ReportService.Totals(orders);
+            Console.WriteLine($"Замовлень: {t.Count}, загальна сума: {t.Total:F2}, середній чек: {t.Average:F2}, максимум: {t.Max:F2}");
+            break;
+        }
+
+        case "report-orders":
+            Console.WriteLine("=== Топ-5 замовлень ===");
+            PrintOrders(ReportService.TopOrders(orders, 5));
+            break;
+
+        case "report-join":
+            Console.WriteLine("=== Клієнти та їхні замовлення (GroupJoin) ===");
+
+            foreach (var c in ReportService.CustomerOrders(SampleData.Customers(), orders))
+                Console.WriteLine($"{c.CustomerId,-8} {c.Name,-15} замовлень: {c.Count,3} сума: {c.Total,10:F2}");
+            break;
+
+        case "report-query":
+            Console.WriteLine("=== Групування через синтаксис запитів ===");
+            PrintGroups(ReportService.ByStatusQuery(orders));
+            break;
+
+        case "report-deferred":
+        {
+            Console.WriteLine("=== Відкладене виконання LINQ ===");
+            var d = ReportService.DeferredDemo(orders);
+
+            Console.WriteLine($"До додавання: {d.Before}");
+            Console.WriteLine($"Після додавання: {d.After}");
+            Console.WriteLine($"У знімку після очищення: {d.Snapshot}");
+            Console.WriteLine($"У запиті після очищення: {d.Current}");
+            break;
+        }
+
+        case "report-bench":
+        {
+            Console.WriteLine("=== Вимірювання LINQ на 100 000 записів ===");
+            var b = ReportService.Benchmark(100000);
+
+            Console.WriteLine($"Без проміжного ToList: {b.WithoutList:F3} мс");
+            Console.WriteLine($"Із проміжним ToList: {b.WithList:F3} мс");
+            Console.WriteLine($"Результати однакові: {b.Equal}");
+            break;
+        }
+
+        default:
+            Console.WriteLine("Доступні команди:");
+            Console.WriteLine("report-top | report-high | report-groups | report-sum");
+            Console.WriteLine("report-orders | report-join | report-query | report-deferred | report-bench");
+            break;
+    }
+}
+
+static void PrintOrders(IReadOnlyList<OrderReportLine> lines)
+{
+    Console.WriteLine($"{"Замовлення",-36} {"Клієнт",-10} {"Сума",10} {"Статус",-10}");
+
+    foreach (var o in lines)
+        Console.WriteLine($"{o.OrderId,-36} {o.CustomerId,-10} {o.Total,10:F2} {o.Status,-10}");
+}
+
+static void PrintGroups(IReadOnlyList<GroupSummary> groups)
+{
+    foreach (var g in groups)
+        Console.WriteLine($"{g.Key,-12} позицій: {g.Count,3} сумарно: {g.Total,10:F2}");
 }
