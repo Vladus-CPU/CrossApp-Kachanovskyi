@@ -37,8 +37,11 @@ public sealed class Order
 
     public void AddLine(string productId, string name, decimal price, int quantity)
     {
+        if (Status == OrderStatus.Confirmed)
+            throw new DomainException($"Замовлення {Id} вже підтверджено");
+
         if (Status != OrderStatus.Draft)
-            throw new InvalidOperationException($"Замовлення {Id} не можна змінювати у стані {Status}");
+            throw new DomainException($"Замовлення {Id} не можна змінювати у стані {Status}");
 
         OrderLine line = OrderLine.Create(productId, name, price, quantity);
         _lines.Add(line);
@@ -47,14 +50,14 @@ public sealed class Order
     public void Confirm()
     {
         if (_lines.Count == 0)
-            throw new InvalidOperationException($"Замовлення {Id} порожнє, його не можна підтвердити");
+            throw new DomainException($"Замовлення {Id} порожнє, його не можна підтвердити");
 
         Status = Status switch
         {
             OrderStatus.Draft => OrderStatus.Confirmed,
-            OrderStatus.Confirmed => throw new InvalidOperationException($"Замовлення {Id} вже підтверджене"),
-            OrderStatus.Cancelled => throw new InvalidOperationException($"Скасоване замовлення {Id} не можна підтвердити"),
-            _ => throw new InvalidOperationException("Невідомий стан замовлення")
+            OrderStatus.Confirmed => throw new DomainException($"Замовлення {Id} вже підтверджене"),
+            OrderStatus.Cancelled => throw new DomainException($"Скасоване замовлення {Id} не можна підтвердити"),
+            _ => throw new DomainException("Невідомий стан замовлення")
         };
     }
 
@@ -63,43 +66,45 @@ public sealed class Order
         Status = Status switch
         {
             OrderStatus.Draft => OrderStatus.Cancelled,
-            OrderStatus.Confirmed => throw new InvalidOperationException($"Підтверджене замовлення {Id} не можна скасувати"),
-            OrderStatus.Cancelled => throw new InvalidOperationException($"Замовлення {Id} вже скасоване"),
-            _ => throw new InvalidOperationException("Невідомий стан замовлення")
+            OrderStatus.Confirmed => throw new DomainException($"Підтверджене замовлення {Id} не можна скасувати"),
+            OrderStatus.Cancelled => throw new DomainException($"Замовлення {Id} вже скасоване"),
+            _ => throw new DomainException("Невідомий стан замовлення")
         };
     }
 
     public OrderDto ToDto() => new(Id, CustomerId, _lines.Select(line => line.ToDto()).ToList(), Status);
 
     public static Order FromDto(OrderDto dto)
-{
-    if (dto is null)
-        throw new ArgumentNullException(nameof(dto));
-
-    if (dto.Lines is null)
-        throw new ArgumentException("Список рядків замовлення не може бути null", nameof(dto));
-
-    Order order = Create(dto.Id, dto.CustomerId);
-
-    foreach (OrderLineDto line in dto.Lines)
-        order.AddLine(line.ProductId, line.Name, line.Price, line.Quantity);
-
-    switch (dto.Status)
     {
-        case OrderStatus.Draft:
-            break;
+        ArgumentNullException.ThrowIfNull(dto);
 
-        case OrderStatus.Confirmed:
-            order.Confirm();
-            break;
+        if (dto.Lines is null)
+            throw new ArgumentException("Список рядків замовлення не може бути null", nameof(dto));
 
-        case OrderStatus.Cancelled:
-            order.Cancel();
-            break;
+        Order order = Create(dto.Id, dto.CustomerId);
+
+        foreach (OrderLineDto line in dto.Lines)
+            order.AddLine(line.ProductId, line.Name, line.Price, line.Quantity);
+
+        switch (dto.Status)
+        {
+            case OrderStatus.Draft:
+                break;
+
+            case OrderStatus.Confirmed:
+                order.Confirm();
+                break;
+
+            case OrderStatus.Cancelled:
+                order.Cancel();
+                break;
+
+            default:
+                throw new ArgumentException("Невідомий статус замовлення", nameof(dto));
+        }
+
+        return order;
     }
-
-    return order;
-}
 
     public override string ToString() => $"{Id} клієнт {CustomerId}, рядків: {_lines.Count}, сума: {Total:F2}, стан: {Status}";
 }

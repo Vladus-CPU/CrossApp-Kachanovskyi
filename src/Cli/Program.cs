@@ -1,6 +1,6 @@
-﻿
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Cli;
 using Core;
 using Core.Domain;
@@ -8,8 +8,17 @@ using Core.Dto;
 using Core.Events;
 using Core.Import;
 using Core.Reports;
+using Core.Services;
+using Core.Storage;
 
 Console.OutputEncoding = Encoding.UTF8;
+
+if (args.Length > 0 &&
+    (args[0].Equals("import-orders", StringComparison.OrdinalIgnoreCase) ||
+     args[0].Equals("import-stream", StringComparison.OrdinalIgnoreCase)))
+{
+    return await RunOrderImportAsync(args);
+}
 
 string? reportCommand = args.FirstOrDefault(a => a.StartsWith("report-", StringComparison.OrdinalIgnoreCase));
 
@@ -301,7 +310,7 @@ static void RunOrderStorage(string[] args)
         {
             service.AddLine(created.Id, "P-999", "Некоректний товар", 100m, -1);
         }
-        catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+        catch (Exception ex) when ( ex is ArgumentException || ex is InvalidOperationException || ex is DomainException)
         {
             Console.WriteLine($"Помилка: {ex.Message}");
         }
@@ -361,14 +370,14 @@ static void RunOrderStorage(string[] args)
         {
             service.Confirm("ORDER-NOT-FOUND");
         }
-        catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+        catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is DomainException)
         {
             Console.WriteLine($"Помилка: {ex.Message}");
         }
 
         Console.WriteLine($"Подій після відмови: {changes} (було: {beforeMissingId})");
     }
-    catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+    catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is DomainException)
     {
         Console.WriteLine($"Помилка: {ex.Message}");
     }
@@ -455,6 +464,7 @@ static void RunReports(string command, string[] args)
         case "report-deferred":
         {
             Console.WriteLine("=== Відкладене виконання LINQ ===");
+
             var d = ReportService.DeferredDemo(orders);
 
             Console.WriteLine($"До додавання: {d.Before}");
@@ -467,6 +477,7 @@ static void RunReports(string command, string[] args)
         case "report-bench":
         {
             Console.WriteLine("=== Вимірювання LINQ на 100 000 записів ===");
+
             var b = ReportService.Benchmark(100000);
 
             Console.WriteLine($"Без проміжного ToList: {b.WithoutList:F3} мс");
@@ -495,4 +506,121 @@ static void PrintGroups(IReadOnlyList<GroupSummary> groups)
 {
     foreach (var g in groups)
         Console.WriteLine($"{g.Key,-12} позицій: {g.Count,3} сумарно: {g.Total,10:F2}");
+}
+
+static async Task<int> RunOrderImportAsync(string[] args)
+{
+    string path = args.Length > 1 && !args[1].StartsWith("--") ? args[1] : Path.Combine("data", "orders.json");
+
+    using var userCts = new CancellationTokenSource();
+    using var timeoutCts = new CancellationTokenSource();
+    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(userCts.Token, timeoutCts.Token);
+
+    int timeoutIndex = Array.FindIndex(args, a => a.Equals("--timeout", StringComparison.OrdinalIgnoreCase));
+
+    if (timeoutIndex >= 0)
+    {
+        if (timeoutIndex + 1 >= args.Length || !int.TryParse(args[timeoutIndex + 1], out int milliseconds) ||
+            milliseconds <= 0)
+        {
+            Console.WriteLine("Вкажіть тайм-аут у мілісекундах");
+            return 1;
+        }
+
+        timeoutCts.CancelAfter(milliseconds);
+    }
+
+    ConsoleCancelEventHandler handler = (_, e) =>
+    {
+        e.Cancel = true;
+        userCts.Cancel();
+    };
+
+    Console.CancelKeyPress += handler;
+
+    try
+    {
+        if (args.Contains("--cancel"))
+            userCts.Cancel();
+
+        var service = new OrderService(new InMemoryOrderStore());
+        var importer = new JsonOrderImporter();
+
+        int added;
+
+        if (args[0].Equals("import-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            added = await service.ImportStreamingAsync(importer, path, linkedCts.Token);
+        }
+        else
+        {
+            added = await service.ImportAsync(importer, path, linkedCts.Token, new ImportProgress());
+
+            Console.WriteLine();
+        }
+
+        Console.WriteLine($"Імпортовано записів: {added}");
+        return 0;
+    }
+    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !userCts.IsCancellationRequested)
+    {
+        Console.WriteLine("Імпорт скасовано.");
+        Console.WriteLine("Причина: тайм-аут.");
+        return 0;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("Імпорт скасовано.");
+        return 0;
+    }
+    catch (DomainException ex)
+    {
+        Console.WriteLine($"Дані відхилено: {ex.Message}");
+        return 1;
+    }
+    catch (FileNotFoundException)
+    {
+        Console.WriteLine($"Файл не знайдено: {path}");
+        return 1;
+    }
+    catch (JsonException ex)
+    {
+        Console.WriteLine($"Помилка JSON: {ex.Message}");
+        return 1;
+    }
+    catch (IOException ex)
+    {
+        Console.WriteLine($"Помилка читання файлу: {ex.Message}");
+        return 1;
+    }
+    finally
+    {
+        Console.CancelKeyPress -= handler;
+    }
+}
+
+sealed class ImportProgress : IProgress<int>
+{
+    private int _lastPercent;
+
+    public void Report(int value)
+    {
+        if (value < 0) value = 0;
+        if (value > 100) value = 100;
+
+        int current = value / 10 * 10;
+
+        if (current <= _lastPercent) return;
+        _lastPercent = current;
+
+        string bar = "";
+        for (int i = 1; i <= 10; i++)
+        {
+            bar += (i <= current / 10) ? "|" : " ";
+        }
+
+        Console.Write($"\rПрогрес імпорту: [{bar}] {current}%");
+        
+        if (current == 100) Console.WriteLine();
+    }
 }

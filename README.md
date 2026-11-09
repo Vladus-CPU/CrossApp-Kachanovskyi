@@ -447,3 +447,48 @@ dotnet run --project src/Cli -- report-bench
 
 
 Усі запити виконуються через LINQ to Objects. Логіка звітів розміщена в Core, а Cli відповідає за вибір команди та виведення результатів.
+
+
+## Асинхронний імпорт і тестування (ЛР №8)
+
+Реалізовано асинхронний імпорт замовлень із JSON через `JsonOrderImporter` та `OrderService.ImportAsync`. Додано `CancellationToken` для скасування операцій, `DomainException` для порушень бізнес-правил та перевірку повторного імпорту без дублювання записів.
+
+Додатково реалізовано потоковий імпорт через `IAsyncEnumerable<Order>`, тайм-аут зі зв'язаними токенами та відображення прогресу через `IProgress<int>`.
+
+### Запуск
+
+Звичайний імпорт:
+
+```bash
+dotnet run --project src/Cli -- import-orders data/orders.json
+```
+
+Потоковий імпорт:
+
+```bash
+dotnet run --project src/Cli -- import-stream data/orders.json
+```
+
+Перевірка скасування:
+
+```bash
+dotnet run --project src/Cli -- import-orders data/orders.json --cancel
+```
+
+Запуск тестів:
+
+```bash
+dotnet test CrossApp.slnx
+```
+
+Перевірка покриття:
+
+```bash
+dotnet test CrossApp.slnx --collect:"XPlat Code Coverage"
+```
+
+### Результати перевірки
+
+Додано проєкт `tests/Core.Tests` із 13 тестами на основі xUnit. Перевірено бізнес-правила замовлень, події `Changed`, звіти LINQ, асинхронний імпорт, обробку помилок та скасування операцій.
+
+Усі 13 тестів пройдено успішно. Покриття рядків `Core` становить 31,91%. Частина коду залишилася непокритою тестами, оскільки основну увагу приділено перевірці бізнес-правил та асинхронних операцій.

@@ -16,7 +16,7 @@ public static class OrderMapper
                 Order order = Order.FromDto(result.Items[i]);
                 orders.Add(order);
             }
-            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is DomainException)
             {
                 errors.Add($"запис {i + 1}: {ex.Message}");
             }

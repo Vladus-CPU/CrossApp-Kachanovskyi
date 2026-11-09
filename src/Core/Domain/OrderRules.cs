@@ -7,6 +7,6 @@ public static class OrderRules
         int activeOrders = orders.Count(order => order.CustomerId == customer.Id && order.Status == OrderStatus.Draft);
 
         if (activeOrders >= 5)
-            throw new InvalidOperationException($"Клієнт {customer.Id} вже має 5 активних замовлень");
+            throw new DomainException($"Клієнт {customer.Id} вже має 5 активних замовлень");
     }
 }
