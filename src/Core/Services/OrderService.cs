@@ -118,29 +118,42 @@ public sealed class OrderService
         return added;
     }
 
-    public async Task<int> ImportStreamingAsync(IOrderImporter importer, string path, CancellationToken ct = default)
+    public async Task<int> ImportStreamingAsync(IOrderImporter importer, string path, CancellationToken ct = default, IProgress<int>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(importer);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ct.ThrowIfCancellationRequested();
 
         int added = 0;
+        int processed = 0;
+        int total = 0;
+
+        progress?.Report(0);
+
+        await foreach (Order order in importer.StreamAsync(path, ct).WithCancellation(ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            total++;
+        }
 
         await foreach (Order order in importer.StreamAsync(path, ct).WithCancellation(ct))
         {
             ct.ThrowIfCancellationRequested();
 
-            if (_store.GetById(order.Id) is not null)
-                continue;
+            if (_store.GetById(order.Id) is null)
+            {
+                _store.Add(order);
+                OnChanged(order, OrderChangeKind.OrderCreated);
+                added++;
+            }
 
-            _store.Add(order);
-            OnChanged(order, OrderChangeKind.OrderCreated);
-            added++;
+            processed++;
+            progress?.Report((int)((long)processed * 100 / total));
         }
 
+        progress?.Report(100);
         return added;
     }
-
     private Order GetRequired(string id) =>
         _store.GetById(id) ?? throw new DomainException($"Замовлення з id={id} не знайдено.");
 }

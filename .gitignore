@@ -482,3 +482,7 @@ $RECYCLE.BIN/
 *.swp
 
 bad-orders.json
+large-orders.json
+**/orders-store.json
+**/orders-store.json.tmp
+secrets.json

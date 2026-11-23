@@ -6,15 +6,16 @@ namespace Cli;
 
 public static class StoreFactory
 {
-    public static IOrderStore Create(string[] args)
+    public static IOrderStore Create(string[] args, string? storagePath = null)
     {
         bool useFile = args.Any(arg => arg.Equals("--file", StringComparison.OrdinalIgnoreCase));
+
         bool useCache = args.Any(arg => arg.Equals("--cache", StringComparison.OrdinalIgnoreCase));
 
-        string dataPath = Path.Combine("data", "orders.json");
+        string path = storagePath ?? Path.Combine(AppContext.BaseDirectory, "data", "orders-store.json");
 
         IOrderStore store = useFile
-            ? new FileOrderStore(dataPath)
+            ? new FileOrderStore(path)
             : new InMemoryOrderStore(SampleData.Orders());
 
         if (useCache)

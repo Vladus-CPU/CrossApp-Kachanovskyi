@@ -492,3 +492,82 @@ dotnet test CrossApp.slnx --collect:"XPlat Code Coverage"
 Додано проєкт `tests/Core.Tests` із 13 тестами на основі xUnit. Перевірено бізнес-правила замовлень, події `Changed`, звіти LINQ, асинхронний імпорт, обробку помилок та скасування операцій.
 
 Усі 13 тестів пройдено успішно. Покриття рядків `Core` становить 31,91%. Частина коду залишилася непокритою тестами, оскільки основну увагу приділено перевірці бізнес-правил та асинхронних операцій.
+
+## Шляхи, JSON, конфігурація, Secrets
+
+Реалізовано завантаження конфігурації з appsettings.json, перевизначення налаштувань змінними середовища та використання user-secrets. Для файлового сховища замовлень реалізовано кросплатформні шляхи й атомарний запис JSON через .tmp та File.Move.
+
+### Профілі конфігурації
+
+| Параметр | Development | Production |
+|---|---|---|
+| EnvironmentName | Development | Production |
+| Logging:MinimumLevel | Debug | Information |
+| Storage:DataPath | data | data |
+| Storage:FileName | orders-store.json | orders-store.json |
+| Orders:Currency | UAH | UAH |
+
+Основні ключі:
+- `EnvironmentName` — назва середовища;
+- `Logging:MinimumLevel` — рівень логування;
+- `Storage:DataPath` — каталог збереження даних;
+- `Storage:FileName` — назва JSON-файлу;
+- `Orders:Currency` — валюта замовлень;
+- `Integration:ApiKey` — навчальний секретний ключ.
+
+Порядок джерел конфігурації: appsettings.json → appsettings.{Environment}.json → user-secrets → змінні середовища CROSSAPP_ → аргументи конфігурації.
+
+### Змінні середовища
+
+**PowerShell (Windows):**
+
+Вибір профілю Production:
+
+```powershell
+$env:CROSSAPP_ENVIRONMENT = "Production"
+dotnet run --project src/Cli -- export
+Remove-Item Env:CROSSAPP_ENVIRONMENT
+```
+
+Зміна каталогу даних:
+
+```powershell
+$env:CROSSAPP_DATA_PATH = "$HOME\crossapp-lab09"
+dotnet run --project src/Cli -- export
+Remove-Item Env:CROSSAPP_DATA_PATH
+```
+
+**bash (Linux/macOS):**
+
+```bash
+CROSSAPP_ENVIRONMENT=Production dotnet run --project src/Cli -- export
+CROSSAPP_DATA_PATH="$HOME/crossapp-lab09" dotnet run --project src/Cli -- export
+```
+
+Вкладений ключ `Storage:DataPath` також можна перевизначити через `CROSSAPP_Storage__DataPath`.
+
+### User-secrets
+
+Ініціалізація та встановлення навчального ключа:
+
+```bash
+dotnet user-secrets init --project src/Cli
+dotnet user-secrets set "Integration:ApiKey" "local-dev-key" --project src/Cli
+```
+
+Секрет зберігається поза Git-репозиторієм:
+- Windows: `%APPDATA%\Microsoft\UserSecrets\<UserSecretsId>\secrets.json`
+- Linux/macOS: `~/.microsoft/usersecrets/<UserSecretsId>/secrets.json`
+
+У консолі відображаються лише наявність ключа та його довжина, без самого значення.
+
+### Імпорт, експорт і тестування
+
+```bash
+dotnet run --project src/Cli -- export
+dotnet run --project src/Cli -- import data/orders.json
+dotnet build CrossApp.slnx
+dotnet test CrossApp.slnx
+```
+
+Під час перевірки експортовано 20 замовлень, імпортовано 10 записів, підтверджено зміну каталогу через CROSSAPP_DATA_PATH та однаковий шлях до сховища під час запуску з різних робочих каталогів. Усі 13 наявних модульних тестів завершилися успішно.

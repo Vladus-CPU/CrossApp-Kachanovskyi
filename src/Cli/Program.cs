@@ -1,8 +1,11 @@
-﻿using System.Globalization;
+﻿
+using System.Globalization;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Cli;
 using Core;
+using Core.Configuration;
 using Core.Domain;
 using Core.Dto;
 using Core.Events;
@@ -10,8 +13,70 @@ using Core.Import;
 using Core.Reports;
 using Core.Services;
 using Core.Storage;
+using Microsoft.Extensions.Configuration;
 
 Console.OutputEncoding = Encoding.UTF8;
+
+string environment = Environment.GetEnvironmentVariable("CROSSAPP_ENVIRONMENT") ?? "Development";
+string[] configArgs = args.Where(a => a.StartsWith("--", StringComparison.Ordinal) && a.Contains('=')).ToArray();
+
+AppOptions options;
+string storagePath;
+string? apiKey;
+
+try
+{
+    var builder = new ConfigurationBuilder()
+        .SetBasePath(AppContext.BaseDirectory)
+        .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+        .AddJsonFile($"appsettings.{environment}.json", optional: true)
+        .AddUserSecrets(Assembly.GetExecutingAssembly(), optional: true)
+        .AddEnvironmentVariables(prefix: "CROSSAPP_");
+
+    if (configArgs.Length > 0)
+        builder.AddCommandLine(configArgs);
+
+    var config = builder.Build();
+    options = config.Get<AppOptions>() ?? new AppOptions();
+
+    string? oldDataPath = Environment.GetEnvironmentVariable("CROSSAPP_DATA_PATH");
+
+    var storage = new StorageOptions
+    {
+        DataPath = string.IsNullOrWhiteSpace(oldDataPath) ? options.Storage.DataPath : oldDataPath,
+        FileName = options.Storage.FileName
+    };
+
+    storagePath = storage.ResolveFullPath(AppContext.BaseDirectory);
+    apiKey = config["Integration:ApiKey"];
+}
+catch (Exception ex) when (ex is IOException or ArgumentException or InvalidOperationException)
+{
+    Console.WriteLine($"Помилка конфігурації: {ex.Message}");
+    return 1;
+}
+
+if (args.Length > 0 &&
+    (args[0].Equals("export", StringComparison.OrdinalIgnoreCase) ||
+     args[0].Equals("import", StringComparison.OrdinalIgnoreCase)))
+{
+    Console.WriteLine($"Файл даних : {storagePath}");
+    Console.WriteLine(string.IsNullOrEmpty(apiKey) ? "ApiKey: не заданий" : $"ApiKey: присутній, довжина {apiKey.Length}");
+    Console.WriteLine($"Профіль: {environment}, лог: {options.Logging.MinimumLevel}, валюта: {options.Orders.Currency}");
+
+    try
+    {
+        if (args[0].Equals("export", StringComparison.OrdinalIgnoreCase))
+            return ExportOrders(storagePath);
+
+        return await ImportOrdersFileAsync(args, storagePath);
+    }
+    catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException or DomainException)
+    {
+        Console.WriteLine($"Помилка: {ex.Message}");
+        return 1;
+    }
+}
 
 if (args.Length > 0 &&
     (args[0].Equals("import-orders", StringComparison.OrdinalIgnoreCase) ||
@@ -20,12 +85,31 @@ if (args.Length > 0 &&
     return await RunOrderImportAsync(args);
 }
 
+if (args.Length > 0 && args[0] == "generate-orders")
+{
+    string outputPath = Path.Combine("data", "large-orders.json");
+    int count = 1000000;
+
+    GenerateLargeOrders(outputPath, count);
+    Console.WriteLine($"Створено {count} замовлень: {outputPath}");
+
+    return 0;
+}
+
 string? reportCommand = args.FirstOrDefault(a => a.StartsWith("report-", StringComparison.OrdinalIgnoreCase));
 
 if (reportCommand is not null)
 {
-    RunReports(reportCommand, args);
-    return 0;
+    try
+    {
+        RunReports(reportCommand, args, storagePath);
+        return 0;
+    }
+    catch (InvalidDataException ex)
+    {
+        Console.WriteLine($"Помилка: {ex.Message}");
+        return 1;
+    }
 }
 
 if (args.Length > 0 && args[0].Equals("--order", StringComparison.OrdinalIgnoreCase))
@@ -167,8 +251,16 @@ bool storeMode = args.Length == 0 ||
 
 if (storeMode)
 {
-    RunOrderStorage(args);
-    return 0;
+    try
+    {
+        RunOrderStorage(args, storagePath);
+        return 0;
+    }
+    catch (InvalidDataException ex)
+    {
+        Console.WriteLine($"Помилка: {ex.Message}");
+        return 1;
+    }
 }
 
 bool mixedMode = args.Length > 0 && args[0].Equals("--mixed", StringComparison.OrdinalIgnoreCase);
@@ -262,9 +354,47 @@ Console.WriteLine($"Статистика: усього {allRecords} / прийн
 
 return 0;
 
-static void RunOrderStorage(string[] args)
+static int ExportOrders(string path)
 {
-    var (service, store) = CompositionRoot.Create(args);
+    var store = new FileOrderStore(path);
+    IReadOnlyList<Order> orders = File.Exists(path) ? store.List() : SampleData.Orders();
+
+    store.SaveAll(orders);
+
+    Console.WriteLine($"Експортовано {orders.Count} записів.");
+    return 0;
+}
+
+static async Task<int> ImportOrdersFileAsync(string[] args, string path)
+{
+    if (args.Length < 2 || args[1].StartsWith("--"))
+    {
+        Console.WriteLine("Вкажіть JSON-файл. Приклад: import data/orders.json");
+        return 1;
+    }
+
+    string source = Path.GetFullPath(args[1]);
+    StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+    if (source.Equals(path, comparison))
+    {
+        Console.WriteLine("Вхідний файл і файл сховища мають бути різними.");
+        return 1;
+    }
+
+    var importer = new JsonOrderImporter();
+    IReadOnlyList<Order> orders = await importer.LoadAsync(source);
+
+    var store = new FileOrderStore(path);
+    store.SaveAll(orders);
+
+    Console.WriteLine($"Імпортовано {orders.Count} записів.");
+    return 0;
+}
+
+static void RunOrderStorage(string[] args, string storagePath)
+{
+    var (service, store) = CompositionRoot.Create(args, storagePath);
 
     string logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
     Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
@@ -310,7 +440,7 @@ static void RunOrderStorage(string[] args)
         {
             service.AddLine(created.Id, "P-999", "Некоректний товар", 100m, -1);
         }
-        catch (Exception ex) when ( ex is ArgumentException || ex is InvalidOperationException || ex is DomainException)
+        catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is DomainException)
         {
             Console.WriteLine($"Помилка: {ex.Message}");
         }
@@ -321,7 +451,6 @@ static void RunOrderStorage(string[] args)
         Console.WriteLine("=== Відписка від події ===");
 
         service.Changed -= OnOrderChanged;
-
         service.AddLine(created.Id, "P-102", "Миша", 649.50m, 2);
 
         Console.WriteLine($"Подій отримано: {changes}");
@@ -402,9 +531,9 @@ static void RunOrderStorage(string[] args)
     Console.WriteLine("DI-повідомлення записано у logs/di.log");
 }
 
-static void RunReports(string command, string[] args)
+static void RunReports(string command, string[] args, string storagePath)
 {
-    var (service, _) = CompositionRoot.Create(args);
+    var (service, _) = CompositionRoot.Create(args, storagePath);
     IReadOnlyList<Order> orders = service.All();
 
     switch (command.ToLowerInvariant())
@@ -520,8 +649,7 @@ static async Task<int> RunOrderImportAsync(string[] args)
 
     if (timeoutIndex >= 0)
     {
-        if (timeoutIndex + 1 >= args.Length || !int.TryParse(args[timeoutIndex + 1], out int milliseconds) ||
-            milliseconds <= 0)
+        if (timeoutIndex + 1 >= args.Length || !int.TryParse(args[timeoutIndex + 1], out int milliseconds) || milliseconds <= 0)
         {
             Console.WriteLine("Вкажіть тайм-аут у мілісекундах");
             return 1;
@@ -550,12 +678,11 @@ static async Task<int> RunOrderImportAsync(string[] args)
 
         if (args[0].Equals("import-stream", StringComparison.OrdinalIgnoreCase))
         {
-            added = await service.ImportStreamingAsync(importer, path, linkedCts.Token);
+            added = await service.ImportStreamingAsync(importer, path, linkedCts.Token, new ImportProgress());
         }
         else
         {
             added = await service.ImportAsync(importer, path, linkedCts.Token, new ImportProgress());
-
             Console.WriteLine();
         }
 
@@ -597,6 +724,35 @@ static async Task<int> RunOrderImportAsync(string[] args)
     {
         Console.CancelKeyPress -= handler;
     }
+}
+
+static void GenerateLargeOrders(string outputPath, int count)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+
+    using var writer = new StreamWriter(outputPath);
+    writer.Write("[");
+
+    for (int i = 1; i <= count; i++)
+    {
+        if (i > 1)
+            writer.Write(",");
+
+        var order = new
+        {
+            Id = $"ORD-DEMO-{i:D6}",
+            CustomerId = $"C-DEMO-{i:D6}",
+            Lines = new[]
+            {
+                new { ProductId = "P-001", Name = "Кабель", Price = 100m, Quantity = 1 }
+            },
+            Status = 0
+        };
+
+        writer.Write(JsonSerializer.Serialize(order));
+    }
+
+    writer.Write("]");
 }
 
 sealed class ImportProgress : IProgress<int>
