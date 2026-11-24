@@ -7,4 +7,7 @@ public sealed record OrderDto(
     string CustomerId,
     IReadOnlyList<OrderLineDto> Lines,
     OrderStatus Status
-);
+)
+{
+    public DateTimeOffset? CreatedAt { get; init; }
+}

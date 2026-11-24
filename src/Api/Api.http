@@ -1,0 +1,125 @@
+@host = http://localhost:5080
+@id = ВСТАВИТИ_ID
+
+### Перевірка роботи API
+GET {{host}}/health
+
+### Список замовлень
+GET {{host}}/api/orders
+
+### Створення замовлення
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "C-001",
+  "lines": [
+    {
+      "productId": "P-001",
+      "name": "Клавіатура",
+      "price": 1200,
+      "quantity": 2
+    },
+    {
+      "productId": "P-002",
+      "name": "Миша",
+      "price": 500,
+      "quantity": 1
+    }
+  ]
+}
+
+### Отримання замовлення
+GET {{host}}/api/orders/{{id}}
+
+### Загальна сума
+GET {{host}}/api/orders/{{id}}/total
+
+### Оновлення замовлення
+PUT {{host}}/api/orders/{{id}}
+Content-Type: application/json
+
+{
+  "customerId": "C-001",
+  "lines": [
+    {
+      "productId": "P-001",
+      "name": "Клавіатура",
+      "price": 1200,
+      "quantity": 3
+    }
+  ]
+}
+
+### Помилка валідації
+PUT {{host}}/api/orders/{{id}}
+Content-Type: application/json
+
+{
+  "customerId": "C-001",
+  "lines": [
+    {
+      "productId": "P-001",
+      "name": "",
+      "price": 1200,
+      "quantity": 3
+    }
+  ]
+}
+
+### Некоректні дані
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "",
+  "lines": []
+}
+
+### Від'ємна кількість
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "C-001",
+  "lines": [
+    {
+      "productId": "P-001",
+      "name": "Клавіатура",
+      "price": 1200,
+      "quantity": -1
+    }
+  ]
+}
+
+### Некоректний тип даних
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "C-001",
+  "lines": [
+    {
+      "productId": "P-001",
+      "name": "Клавіатура",
+      "price": 1200,
+      "quantity": "abc"
+    }
+  ]
+}
+
+### Порожнє тіло
+POST {{host}}/api/orders
+Content-Type: application/json
+
+### Пагінація та пошук
+GET {{host}}/api/orders?page=1&pageSize=20&search=C-001
+
+### Некоректна пагінація
+GET {{host}}/api/orders?page=0&pageSize=200
+
+### Видалення замовлення
+DELETE {{host}}/api/orders/{{id}}
+
+### Перевірка після видалення
+GET {{host}}/api/orders/{{id}}

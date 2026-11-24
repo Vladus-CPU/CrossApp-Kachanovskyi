@@ -571,3 +571,73 @@ dotnet test CrossApp.slnx
 ```
 
 Під час перевірки експортовано 20 замовлень, імпортовано 10 записів, підтверджено зміну каталогу через CROSSAPP_DATA_PATH та однаковий шлях до сховища під час запуску з різних робочих каталогів. Усі 13 наявних модульних тестів завершилися успішно.
+
+## Minimal API
+
+Реалізовано HTTP API для роботи із замовленнями на основі Core. Використано DTO, DI, FluentValidation, ProblemDetails, OpenAPI та Scalar.
+
+### Запуск
+
+```powershell
+dotnet build
+dotnet test
+dotnet run --project src/Api --urls http://localhost:5080
+```
+
+- API: http://localhost:5080
+- Scalar: http://localhost:5080/scalar/v1
+- OpenAPI: http://localhost:5080/openapi/v1.json
+
+### Маршрути
+
+| Метод | Маршрут | Призначення | Коди відповіді |
+|---|---|---|---|
+| GET | /api/orders | Список замовлень | 200, 400 |
+| GET | /api/orders/{id} | Отримання замовлення | 200, 404 |
+| POST | /api/orders | Створення замовлення | 201, 400, 409 |
+| PUT | /api/orders/{id} | Оновлення замовлення | 200, 400, 404, 409 |
+| DELETE | /api/orders/{id} | Видалення замовлення | 204, 404 |
+| GET | /api/orders/{id}/total | Загальна сума замовлення | 200, 404 |
+
+### Приклади curl (PowerShell 7.3+)
+
+Отримання списку:
+
+```powershell
+curl.exe -i http://localhost:5080/api/orders
+```
+
+Створення замовлення:
+
+```powershell
+curl.exe -i -X POST http://localhost:5080/api/orders -H "Content-Type: application/json" -d '{"customerId":"C-001","lines":[{"productId":"P-001","name":"Mouse","price":500,"quantity":2}]}'
+```
+
+Перевірка валідації:
+
+```powershell
+curl.exe -i -X POST http://localhost:5080/api/orders -H "Content-Type: application/json" -d '{"customerId":"","lines":[]}'
+```
+
+Пагінація та пошук:
+
+```powershell
+curl.exe -i "http://localhost:5080/api/orders?page=1&pageSize=20&search=C-001"
+```
+
+Для перевірки CRUD використовується Scalar або файл `src/Api/Api.http`.
+
+Сховище `InMemoryOrderStore` зареєстровано в DI як Singleton. OpenAPI та Scalar доступні лише в середовищі Development. CLI залишено без змін.
+
+### Додаткові завдання
+
+1. Пагінація та пошук за ID замовлення або клієнта.
+2. Валідація DTO через FluentValidation та AddEndpointFilter.
+3. Обробка DomainException з поверненням 409 Conflict.
+4. Інтеграційні тести через WebApplicationFactory.
+
+Запуск інтеграційних тестів:
+
+```powershell
+dotnet test tests/Api.Tests
+```

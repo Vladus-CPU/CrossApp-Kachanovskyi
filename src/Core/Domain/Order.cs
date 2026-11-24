@@ -8,6 +8,7 @@ public sealed class Order
 
     public string Id { get; }
     public string CustomerId { get; }
+    public DateTimeOffset? CreatedAt { get; private set; }
     public IReadOnlyList<OrderLine> Lines => _lines.AsReadOnly();
     public OrderStatus Status { get; private set; }
     public decimal Total => _lines.Sum(line => line.Price * line.Quantity);
@@ -16,6 +17,7 @@ public sealed class Order
     {
         Id = id;
         CustomerId = customerId;
+        CreatedAt = DateTimeOffset.UtcNow;
         Status = OrderStatus.Draft;
     }
 
@@ -72,7 +74,7 @@ public sealed class Order
         };
     }
 
-    public OrderDto ToDto() => new(Id, CustomerId, _lines.Select(line => line.ToDto()).ToList(), Status);
+    public OrderDto ToDto() => new(Id, CustomerId, _lines.Select(line => line.ToDto()).ToList(), Status) { CreatedAt = CreatedAt };
 
     public static Order FromDto(OrderDto dto)
     {
@@ -82,6 +84,7 @@ public sealed class Order
             throw new ArgumentException("Список рядків замовлення не може бути null", nameof(dto));
 
         Order order = Create(dto.Id, dto.CustomerId);
+        order.CreatedAt = dto.CreatedAt;
 
         foreach (OrderLineDto line in dto.Lines)
             order.AddLine(line.ProductId, line.Name, line.Price, line.Quantity);
